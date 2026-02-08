@@ -1,0 +1,23 @@
+# TTSH@Home Nurse Scheduling System
+# Requirements for Streamlit Cloud / Local deployment
+
+# Core dependencies
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+openpyxl>=3.1.0
+
+# Optimization (Google OR-Tools)
+ortools>=9.7.0
+
+# Mapping and visualization
+folium>=0.14.0
+streamlit-folium>=0.15.0
+plotly>=5.18.0
+
+# Web requests (for OneMap API)
+requests>=2.31.0
+
+# Optional: for Jupyter notebook
+jupyter>=1.0.0
+ipywidgets>=8.1.0
