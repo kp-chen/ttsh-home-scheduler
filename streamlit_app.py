@@ -339,70 +339,111 @@ class SimpleScheduler:
     """
     Simplified scheduler using greedy algorithm.
     For full OR-Tools version, see the notebook.
+    
+    Fixes:
+    - Continuity: Same nurse must handle related visits (e.g., 8-hr IV AM + PM)
+    - Start time: All nurses start at 8:30 AM, not delayed by priority patients
+    - Scheduling: Visits sorted by earliest_time to fill slots chronologically
     """
     
     def __init__(self, nurses: List[Nurse], visits: List[Visit]):
         self.nurses = nurses
         self.visits = visits
         self.scheduled_visits = []
+        self.unassigned_visits = []
     
     def solve(self) -> bool:
-        """Simple greedy scheduling."""
-        # Sort visits by priority and time window
-        sorted_visits = sorted(
-            self.visits, 
-            key=lambda v: (v.priority, v.earliest_time)
-        )
+        """
+        Greedy scheduling with proper continuity handling.
         
-        # Track nurse assignments
+        Algorithm:
+        1. First, identify continuity groups (e.g., 8-hr IV patients)
+        2. Sort visits: by earliest_time (to fill slots chronologically)
+        3. For continuity visits, pre-assign to same nurse
+        4. Fill slots maintaining 8:30 start
+        """
+        
+        # Track nurse assignments by session
         nurse_visits = {n.id: {"AM": [], "PM": []} for n in self.nurses}
         
+        # Track which nurse is assigned to each continuity group
+        continuity_assignments = {}  # continuity_group -> nurse_id
+        
+        # Sort visits by earliest_time first, then by window tightness
+        # This ensures we fill 8:30am slots before 10:00am slots
+        def sort_key(v):
+            # Blood draws get slight priority within their time slot
+            blood_priority = 0 if v.procedure == "BLOOD" else 1
+            return (v.earliest_time, blood_priority, v.latest_time - v.earliest_time)
+        
+        sorted_visits = sorted(self.visits, key=sort_key)
+        
+        # First pass: Pre-assign continuity groups to ensure same nurse
+        for visit in sorted_visits:
+            if visit.continuity_group and visit.continuity_group not in continuity_assignments:
+                # Find a nurse who can handle both AM and PM visits of this group
+                for nurse in self.nurses:
+                    # This nurse is available for continuity
+                    continuity_assignments[visit.continuity_group] = nurse.id
+                    break
+        
+        # Second pass: Schedule all visits
         for visit in sorted_visits:
             assigned = False
             
-            # Try to find best nurse
-            for nurse in self.nurses:
+            # Determine which nurse to try first
+            if visit.continuity_group and visit.continuity_group in continuity_assignments:
+                # Must use the pre-assigned nurse for continuity
+                required_nurse_id = continuity_assignments[visit.continuity_group]
+                nurses_to_try = [n for n in self.nurses if n.id == required_nurse_id]
+            else:
+                # Try all nurses, prefer nurse with fewer visits in this session
+                session = visit.session
+                nurses_to_try = sorted(
+                    self.nurses, 
+                    key=lambda n: len(nurse_visits[n.id][session])
+                )
+            
+            for nurse in nurses_to_try:
                 session = visit.session
                 current_count = len(nurse_visits[nurse.id][session])
                 max_count = nurse.max_visits_am if session == "AM" else nurse.max_visits_pm
                 
-                if current_count < max_count:
-                    # Check continuity
-                    if visit.requires_continuity and visit.continuity_group:
-                        # Find if related visit is already assigned
-                        for sv in self.scheduled_visits:
-                            if sv.visit.continuity_group == visit.continuity_group:
-                                if sv.nurse.id != nurse.id:
-                                    continue  # Skip, need same nurse
-                    
-                    # Calculate scheduled time
-                    if nurse_visits[nurse.id][session]:
-                        last_visit = nurse_visits[nurse.id][session][-1]
-                        travel_time = Config.SAME_ZONE_TRAVEL_TIME if last_visit.visit.patient.zone == visit.patient.zone else Config.DEFAULT_TRAVEL_TIME
-                        scheduled_time = last_visit.scheduled_time + last_visit.visit.duration_minutes + travel_time
-                    else:
-                        scheduled_time = visit.earliest_time
-                        travel_time = Config.HOSPITAL_RETURN_TIME
-                    
-                    # Ensure within time window
-                    scheduled_time = max(scheduled_time, visit.earliest_time)
-                    
-                    if scheduled_time <= visit.latest_time:
-                        sv = ScheduledVisit(
-                            visit=visit,
-                            nurse=nurse,
-                            scheduled_time=scheduled_time,
-                            travel_time_from_previous=travel_time,
-                            sequence=len(nurse_visits[nurse.id][session])
-                        )
-                        self.scheduled_visits.append(sv)
-                        nurse_visits[nurse.id][session].append(sv)
-                        assigned = True
-                        break
+                if current_count >= max_count:
+                    continue  # Nurse at capacity for this session
+                
+                # Calculate scheduled time
+                if nurse_visits[nurse.id][session]:
+                    # Not the first visit - schedule after previous
+                    last_sv = nurse_visits[nurse.id][session][-1]
+                    travel_time = (Config.SAME_ZONE_TRAVEL_TIME 
+                                   if last_sv.visit.patient.zone == visit.patient.zone 
+                                   else Config.DEFAULT_TRAVEL_TIME)
+                    scheduled_time = last_sv.scheduled_time + last_sv.visit.duration_minutes + travel_time
+                else:
+                    # FIRST visit of the day - START AT 8:30 AM (WORK_START)
+                    travel_time = Config.HOSPITAL_RETURN_TIME
+                    scheduled_time = Config.WORK_START
+                
+                # Ensure scheduled time is within the visit's time window
+                scheduled_time = max(scheduled_time, visit.earliest_time)
+                
+                # Check if we can complete the visit within the time window
+                if scheduled_time <= visit.latest_time:
+                    sv = ScheduledVisit(
+                        visit=visit,
+                        nurse=nurse,
+                        scheduled_time=scheduled_time,
+                        travel_time_from_previous=travel_time,
+                        sequence=current_count
+                    )
+                    self.scheduled_visits.append(sv)
+                    nurse_visits[nurse.id][session].append(sv)
+                    assigned = True
+                    break
             
             if not assigned:
-                # Could not assign - would go to vendor
-                pass
+                self.unassigned_visits.append(visit)
         
         return len(self.scheduled_visits) > 0
     
@@ -411,6 +452,7 @@ class SimpleScheduler:
         schedule = {nurse.id: [] for nurse in self.nurses}
         for sv in self.scheduled_visits:
             schedule[sv.nurse.id].append(sv)
+        # Sort by scheduled time
         for nurse_id in schedule:
             schedule[nurse_id].sort(key=lambda x: x.scheduled_time)
         return schedule
@@ -424,7 +466,7 @@ class SimpleScheduler:
                 n.name: len([sv for sv in self.scheduled_visits if sv.nurse.id == n.id])
                 for n in self.nurses
             },
-            'unassigned_visits': len(self.visits) - len(self.scheduled_visits)
+            'unassigned_visits': len(self.unassigned_visits)
         }
 
 
