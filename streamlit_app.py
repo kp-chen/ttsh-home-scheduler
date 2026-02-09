@@ -518,83 +518,89 @@ def main():
                         success = scheduler.solve()
                         
                         if success:
-                            st.success("✅ Schedule generated successfully!")
-                            
                             # Store in session state
                             st.session_state['scheduler'] = scheduler
                             st.session_state['patients'] = patients
                             st.session_state['visits'] = visits
                             st.session_state['nurses'] = nurses
-                            
-                            # Show results
-                            metrics = scheduler.calculate_metrics()
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            col1.metric("Total Visits", metrics['total_visits'])
-                            col2.metric("Travel Time", f"{metrics['total_travel_time']} min")
-                            col3.metric("Unassigned", metrics['unassigned_visits'])
-                            col4.metric("Nurses", len(nurses))
-                            
-                            # Schedule table
-                            st.subheader("📋 Generated Schedule")
-                            
-                            schedule = scheduler.get_schedule_by_nurse()
-                            
-                            for nurse in nurses:
-                                nurse_visits = schedule[nurse.id]
-                                
-                                st.markdown(f"### 👩‍⚕️ {nurse.name} ({len(nurse_visits)} visits)")
-                                
-                                if nurse_visits:
-                                    schedule_data = []
-                                    for sv in nurse_visits:
-                                        schedule_data.append({
-                                            "Seq": sv.sequence + 1,
-                                            "Time": minutes_to_time_string(sv.scheduled_time),
-                                            "Patient": sv.visit.patient.name,
-                                            "Procedure": sv.visit.procedure,
-                                            "Zone": sv.visit.patient.zone,
-                                            "Travel (min)": sv.travel_time_from_previous
-                                        })
-                                    st.dataframe(pd.DataFrame(schedule_data), use_container_width=True)
-                                else:
-                                    st.info("No visits assigned")
-                            
-                            # Export button
-                            st.subheader("📥 Export Schedule")
-                            
-                            # Create export DataFrame
-                            export_rows = []
-                            for nurse in nurses:
-                                for sv in schedule[nurse.id]:
-                                    export_rows.append({
-                                        'Nurse': nurse.name,
-                                        'Sequence': sv.sequence + 1,
-                                        'Scheduled Time': minutes_to_time_string(sv.scheduled_time),
-                                        'Patient Name': sv.visit.patient.name,
-                                        'Location': sv.visit.patient.address,
-                                        'Zone': sv.visit.patient.zone,
-                                        'Procedure': sv.visit.procedure,
-                                        'Session': sv.visit.session,
-                                        'Travel Time (min)': sv.travel_time_from_previous
-                                    })
-                            
-                            export_df = pd.DataFrame(export_rows)
-                            
-                            # Excel download
-                            buffer = io.BytesIO()
-                            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                                export_df.to_excel(writer, index=False, sheet_name='Schedule')
-                            
-                            st.download_button(
-                                label="📥 Download Schedule (Excel)",
-                                data=buffer.getvalue(),
-                                file_name=f"schedule_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                        
+                            st.session_state['schedule_generated'] = True
+                            st.rerun()  # Rerun to display results
                         else:
                             st.error("❌ Could not generate a feasible schedule")
+                
+                # Display results if schedule was generated (persists after rerun)
+                if st.session_state.get('schedule_generated', False) and 'scheduler' in st.session_state:
+                    st.success("✅ Schedule generated successfully!")
+                    
+                    scheduler = st.session_state['scheduler']
+                    stored_nurses = st.session_state['nurses']
+                    
+                    # Show results
+                    metrics = scheduler.calculate_metrics()
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Total Visits", metrics['total_visits'])
+                    col2.metric("Travel Time", f"{metrics['total_travel_time']} min")
+                    col3.metric("Unassigned", metrics['unassigned_visits'])
+                    col4.metric("Nurses", len(stored_nurses))
+                    
+                    # Schedule table
+                    st.subheader("📋 Generated Schedule")
+                    
+                    schedule = scheduler.get_schedule_by_nurse()
+                    
+                    for nurse in stored_nurses:
+                        nurse_visits = schedule[nurse.id]
+                        
+                        st.markdown(f"### 👩‍⚕️ {nurse.name} ({len(nurse_visits)} visits)")
+                        
+                        if nurse_visits:
+                            schedule_data = []
+                            for sv in nurse_visits:
+                                schedule_data.append({
+                                    "Seq": sv.sequence + 1,
+                                    "Time": minutes_to_time_string(sv.scheduled_time),
+                                    "Patient": sv.visit.patient.name,
+                                    "Procedure": sv.visit.procedure,
+                                    "Zone": sv.visit.patient.zone,
+                                    "Travel (min)": sv.travel_time_from_previous
+                                })
+                            st.dataframe(pd.DataFrame(schedule_data), use_container_width=True)
+                        else:
+                            st.info("No visits assigned")
+                    
+                    # Export button
+                    st.subheader("📥 Export Schedule")
+                    
+                    # Create export DataFrame
+                    export_rows = []
+                    for nurse in stored_nurses:
+                        for sv in schedule[nurse.id]:
+                            export_rows.append({
+                                'Nurse': nurse.name,
+                                'Sequence': sv.sequence + 1,
+                                'Scheduled Time': minutes_to_time_string(sv.scheduled_time),
+                                'Patient Name': sv.visit.patient.name,
+                                'Location': sv.visit.patient.address,
+                                'Zone': sv.visit.patient.zone,
+                                'Procedure': sv.visit.procedure,
+                                'Session': sv.visit.session,
+                                'Travel Time (min)': sv.travel_time_from_previous
+                            })
+                    
+                    export_df = pd.DataFrame(export_rows)
+                    
+                    # Excel download
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        export_df.to_excel(writer, index=False, sheet_name='Schedule')
+                    
+                    st.download_button(
+                        label="📥 Download Schedule (Excel)",
+                        data=buffer.getvalue(),
+                        file_name=f"schedule_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
             
             except Exception as e:
                 st.error(f"Error processing data: {str(e)}")
@@ -659,7 +665,7 @@ def main():
                 
                 route_coords = [[Config.HOSPITAL_LAT, Config.HOSPITAL_LNG]]
                 
-                for sv in nurse_visits:
+                for sv_idx, sv in enumerate(nurse_visits):
                     # Use approximate coordinates based on zone
                     zone_coords = {
                         "North": (1.42, 103.82),
@@ -670,9 +676,11 @@ def main():
                     }
                     
                     lat, lng = zone_coords.get(sv.visit.patient.zone, (1.35, 103.85))
-                    # Add some randomness
-                    lat += np.random.uniform(-0.02, 0.02)
-                    lng += np.random.uniform(-0.02, 0.02)
+                    # Use DETERMINISTIC offset based on patient name hash (not random!)
+                    # This prevents infinite reruns from changing coordinates
+                    name_hash = hash(sv.visit.patient.name + str(sv_idx))
+                    lat += ((name_hash % 1000) / 1000 - 0.5) * 0.04
+                    lng += (((name_hash // 1000) % 1000) / 1000 - 0.5) * 0.04
                     
                     route_coords.append([lat, lng])
                     
@@ -700,7 +708,8 @@ def main():
                     popup=f"{nurse.name}'s Route"
                 ).add_to(m)
             
-            st_folium(m, width=800, height=500)
+            # CRITICAL: returned_objects=[] prevents infinite rerun loops!
+            st_folium(m, width=800, height=500, returned_objects=[])
             
             # Legend
             st.markdown("**Legend:**")
