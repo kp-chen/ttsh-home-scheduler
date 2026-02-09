@@ -509,10 +509,10 @@ def main():
     
     # Tab 1: Upload and Schedule
     with tab1:
-        st.header("Upload Patient Data")
+        st.header("Upload Anonymized Patient Data")
         
         uploaded_file = st.file_uploader(
-            "Upload Excel file with patient data",
+            "Upload Excel file with anonymized patient data",
             type=['xlsx', 'xls'],
             help="Excel file should have columns: Name, Location, Home Visit task/time, Session 2 task/time, Priority, Language"
         )
