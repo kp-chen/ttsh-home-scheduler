@@ -475,10 +475,27 @@ def main():
             help="Excel file should have columns: Name, Location, Home Visit task/time, Session 2 task/time, Priority, Language"
         )
         
+        # Determine data source: file upload, sample data, or none
+        df = None
+        data_source = None
+        
         if uploaded_file is not None:
             try:
                 df = pd.read_excel(uploaded_file)
-                st.success(f"✅ Loaded {len(df)} patients")
+                data_source = 'upload'
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+        elif 'sample_df' in st.session_state:
+            df = st.session_state['sample_df']
+            data_source = 'sample'
+        
+        # If we have data, process it
+        if df is not None:
+            try:
+                if data_source == 'upload':
+                    st.success(f"✅ Loaded {len(df)} patients from file")
+                else:
+                    st.success(f"✅ Using sample data: {len(df)} patients")
                 
                 with st.expander("📋 Preview Data"):
                     st.dataframe(df)
@@ -580,10 +597,10 @@ def main():
                             st.error("❌ Could not generate a feasible schedule")
             
             except Exception as e:
-                st.error(f"Error processing file: {str(e)}")
+                st.error(f"Error processing data: {str(e)}")
         
         else:
-            # Show sample data option
+            # No data yet - show sample data option
             st.info("👆 Upload an Excel file to get started, or use sample data below")
             
             if st.button("📝 Use Sample Data"):
@@ -605,7 +622,6 @@ def main():
                 }
                 sample_df = pd.DataFrame(sample_data)
                 st.session_state['sample_df'] = sample_df
-                st.dataframe(sample_df)
                 st.rerun()
     
     # Tab 2: Route Map
